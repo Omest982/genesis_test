@@ -8,13 +8,14 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os/exec"
 	//"errors"
 )
 
 var db *gorm.DB
 
 func dbConnect() *gorm.DB {
-	dsn := "host=localhost user=root dbname=genesis password=root sslmode=disable"
+	dsn := "host=localhost user=postgres dbname=genesis password=root sslmode=disable"
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 
 	if err != nil {
@@ -26,7 +27,11 @@ func dbConnect() *gorm.DB {
 }
 
 func runMigrations() {
-
+	cmd := exec.Command("flyway", "migrate")
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("Failed to execute Flyway migrations: %v", err)
+	}
+	log.Println("Database migrations applied successfully.")
 }
 
 type ExchangeRate struct {
@@ -80,8 +85,8 @@ func sendEmails(c *gin.Context) {
 }
 
 func main() {
-	db := dbConnect()
 	runMigrations()
+	//db := dbConnect()
 
 	controller := gin.New()
 	controller.GET("/rate", GetRate)
