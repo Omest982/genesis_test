@@ -2,21 +2,33 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
+	"gopkg.in/gomail.v2"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"io"
 	"log"
 	"net/http"
 	"net/mail"
+	"os"
 	"os/exec"
-	//"errors"
+	"strconv"
 )
 
 var db *gorm.DB
 
 func initDB() {
-	dsn := "host=localhost user=postgres dbname=genesis password=root sslmode=disable"
+
+	host := os.Getenv("DB_HOST")
+	user := os.Getenv("DB_USER")
+	pass := os.Getenv("DB_PASSWORD")
+	dbname := os.Getenv("DB_NAME")
+
+	dsn := fmt.Sprintf("host=%s user=%s dbname=%s password=%s sslmode=disable", host, user, dbname, pass)
+
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 
@@ -50,41 +62,43 @@ type User struct {
 	Email string `json:"email"`
 }
 
-func GetRate(c *gin.Context) {
-
+func fetchUSDExchangeRate() (float64, error) {
 	resp, err := http.Get("https://bank.gov.ua/NBUStatService/v1/statdirectory/dollar_info?json")
 
 	if err != nil {
-		log.Printf("Error fetching exchange rate data: %v", err)
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Unable to fetch exchange rate data"})
-		return
+		return 0, fmt.Errorf("error fetching exchange rate data: %v", err)
 	}
 
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
-
 	if err != nil {
-		log.Printf("Error reading response body: %v", err)
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Unable to read response body"})
-		return
+		return 0, fmt.Errorf("error reading response body: %v", err)
 	}
 
 	var rates []ExchangeRate
 	err = json.Unmarshal(data, &rates)
-
 	if err != nil {
-		log.Printf("Error unmarshalling JSON data: %v", err)
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Unable to parse exchange rate data"})
-		return
+		return 0, fmt.Errorf("error unmarshalling JSON data: %v", err)
 	}
 
 	if len(rates) > 0 {
-		usdRate := rates[0].Rate
-		c.IndentedJSON(http.StatusOK, usdRate)
-	} else {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "No exchange rate data available"})
+		return rates[0].Rate, nil
 	}
+
+	return 0, fmt.Errorf("no exchange rate data available")
+}
+
+func GetRate(c *gin.Context) {
+
+	usdRate, err := fetchUSDExchangeRate()
+	if err != nil {
+		log.Printf("Error: %v", err)
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, gin.H{"usd_rate": usdRate})
 }
 
 func addSubscription(c *gin.Context) {
@@ -106,8 +120,9 @@ func addSubscription(c *gin.Context) {
 	if result.Error == nil {
 		c.IndentedJSON(http.StatusConflict, gin.H{"error": "This email is already registered"})
 		return
-	} else if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
-		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+	} else if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		log.Println("Database error")
+		c.IndentedJSON(http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -122,10 +137,72 @@ func addSubscription(c *gin.Context) {
 }
 
 func sendEmails(c *gin.Context) {
+	usdRate, err := fetchUSDExchangeRate()
+	if err != nil {
+		log.Printf("Error: %v", err)
+		c.IndentedJSON(http.StatusInternalServerError, nil)
+		return
+	}
+
+	usdRateString := fmt.Sprintf("%v", usdRate)
+
+	var allRegisteredUsers []User
+
+	result := db.Find(&allRegisteredUsers)
+
+	if result.Error != nil {
+		log.Println("Database error")
+		c.IndentedJSON(http.StatusInternalServerError, nil)
+		return
+	}
+
+	var allEmails []string
+
+	for _, value := range allRegisteredUsers {
+		allEmails = append(allEmails, value.Email)
+	}
+
+	if len(allEmails) == 0 {
+		log.Println("No registered users found")
+		c.IndentedJSON(http.StatusOK, "No registered users to send emails to")
+		return
+	}
+
+	smtpUsername := os.Getenv("SMTP_USERNAME")
+
+	m := gomail.NewMessage()
+	m.SetHeader("From", smtpUsername)
+	m.SetHeader("To", allEmails...)
+	m.SetHeader("Subject", "Today's usd/uah rate")
+	m.SetBody("text/plain", usdRateString)
+
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort, err := strconv.Atoi(os.Getenv("SMTP_PORT"))
+	if err != nil {
+		log.Printf("Error: %v", err)
+		c.IndentedJSON(http.StatusInternalServerError, nil)
+		return
+	}
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+
+	d := gomail.NewDialer(smtpHost, smtpPort, smtpUsername, smtpPassword)
+
+	//d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+
+	if err := d.DialAndSend(m); err != nil {
+		log.Fatalf("Error sending email: %v", err)
+	}
+
+	c.IndentedJSON(http.StatusOK, "E-mails send")
 
 }
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
 	initDB()
 	runMigrations()
 
