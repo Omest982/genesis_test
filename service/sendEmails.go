@@ -19,9 +19,9 @@ func SendEmails() error {
 
 	usdRateString := fmt.Sprintf("%v", usdRate)
 
-	var allRegisteredUsers []_type.Subscription
+	var allSubscriptions []_type.Subscription
 
-	result := db.DB.Find(&allRegisteredUsers)
+	result := db.DB.Find(&allSubscriptions)
 
 	if result.Error != nil {
 		log.Println("Database error")
@@ -30,12 +30,12 @@ func SendEmails() error {
 
 	var allEmails []string
 
-	for _, value := range allRegisteredUsers {
+	for _, value := range allSubscriptions {
 		allEmails = append(allEmails, value.Email)
 	}
 
 	if len(allEmails) == 0 {
-		log.Println("No registered users found")
+		log.Println("No registered subscriptions found")
 		return nil
 	}
 

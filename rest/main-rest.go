@@ -7,11 +7,9 @@ import (
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 	"log"
 	"net/http"
-	"net/mail"
 )
 
 func getRate(c *gin.Context) {
@@ -33,14 +31,13 @@ func addSubscription(c *gin.Context) {
 		return
 	}
 
-	if _, err := mail.ParseAddress(createRequest.Email); err != nil {
-		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
-		return
+	if !service.IsEmailValid(createRequest.Email) {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "Enter valid email"})
 	}
 
-	var user _type.Subscription
+	var subscription _type.Subscription
 
-	result := db.DB.Where("email = ?", createRequest.Email).First(&user)
+	result := db.DB.Where("email = ?", createRequest.Email).First(&subscription)
 
 	if result.Error == nil {
 		c.IndentedJSON(http.StatusConflict, gin.H{"error": "This email is already registered"})
@@ -51,9 +48,9 @@ func addSubscription(c *gin.Context) {
 		return
 	}
 
-	user.Email = createRequest.Email
+	subscription.Email = createRequest.Email
 
-	if err := db.DB.Create(&user).Error; err != nil {
+	if err := db.DB.Create(&subscription).Error; err != nil {
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
@@ -70,22 +67,6 @@ func sendEmailsHandler(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, "Emails sent successfully")
 }
 
-func setupDailyEmails() {
-	c := cron.New()
-	//Schedule the sendEmails function to run at 8 AM every day
-	_, err := c.AddFunc("0 8 * * *", func() {
-		if err := service.SendEmails(); err != nil {
-			log.Fatalf("Error in scheduled email sending: %v", err)
-		}
-	})
-
-	if err != nil {
-		log.Fatalf("Error scheduling cron job: %v", err)
-	}
-
-	c.Start()
-}
-
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Fatalf("Error loading .env file: %v", err)
@@ -98,7 +79,7 @@ func main() {
 	controller.POST("/subscribe", addSubscription)
 	controller.POST("/sendEmails", sendEmailsHandler)
 
-	setupDailyEmails()
+	service.SetupDailyEmails()
 
 	if err := controller.Run("localhost:8080"); err != nil {
 		log.Fatalf("Sever run error")

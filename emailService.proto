@@ -1,0 +1,19 @@
+syntax = 'proto3';
+import "google/protobuf/empty.proto";
+
+option go_package = "awesomeProject/emailService";
+
+message RateResponse {
+  double usd_rate = 1;
+}
+
+message CreateSubscription {
+  string email = 1;
+}
+
+
+service EmailService {
+  rpc rate(google.protobuf.Empty) returns (RateResponse);
+  rpc addSubscription(CreateSubscription) returns (google.protobuf.Empty);
+  rpc sendEmails(google.protobuf.Empty) returns (google.protobuf.Empty);
+}

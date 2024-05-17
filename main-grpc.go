@@ -3,6 +3,8 @@ package main
 import (
 	"awesomeProject/db"
 	"awesomeProject/emailService"
+	"awesomeProject/service"
+	_type "awesomeProject/type"
 	"context"
 	"fmt"
 	"google.golang.org/grpc"
@@ -16,7 +18,7 @@ type myEmailServer struct {
 }
 
 func (s myEmailServer) Rate(context.Context, *emptypb.Empty) (*emailService.RateResponse, error) {
-	usdRate, err := fetchUSDExchangeRate()
+	usdRate, err := service.FetchUSDExchangeRate()
 	if err != nil {
 		log.Printf("Error fetching usd/uah rate: %s", err)
 		return nil, err
@@ -25,7 +27,16 @@ func (s myEmailServer) Rate(context.Context, *emptypb.Empty) (*emailService.Rate
 	return &emailService.RateResponse{UsdRate: usdRate}, nil
 }
 
-func (s myEmailServer) AddSubscription(context.Context, *emailService.CreateSubscription) (*emptypb.Empty, error) {
+func (s myEmailServer) AddSubscription(ctx context.Context, createRequest *emailService.CreateSubscription) (*emptypb.Empty, error) {
+	var subscription _type.Subscription
+
+	if !service.IsEmailValid(createRequest.Email) {
+		return nil, nil
+	}
+
+	subscription.Email = createRequest.Email
+
+	db.DB.Create()
 
 	return
 }
@@ -33,14 +44,6 @@ func (s myEmailServer) AddSubscription(context.Context, *emailService.CreateSubs
 func (s myEmailServer) SendEmails(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 
 	return
-}
-
-type ExchangeRate struct {
-	R030         int     `json:"r030"`
-	Txt          string  `json:"txt"`
-	Rate         float64 `json:"rate"`
-	Cc           string  `json:"cc"`
-	ExchangeDate string  `json:"exchangedate"`
 }
 
 func main() {
