@@ -8,22 +8,21 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/mail"
 	"os/exec"
 	//"errors"
 )
 
 var db *gorm.DB
 
-func dbConnect() *gorm.DB {
+func initDB() {
 	dsn := "host=localhost user=postgres dbname=genesis password=root sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	var err error
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 
 	if err != nil {
 		log.Fatal("Failed to connect to database")
-		return nil
 	}
-
-	return db
 }
 
 func runMigrations() {
@@ -40,6 +39,15 @@ type ExchangeRate struct {
 	Rate         float64 `json:"rate"`
 	Cc           string  `json:"cc"`
 	ExchangeDate string  `json:"exchangedate"`
+}
+
+type UserCreateDto struct {
+	Email string `json:"email"`
+}
+
+type User struct {
+	Id    int    `json:"id"`
+	Email string `json:"email"`
 }
 
 func GetRate(c *gin.Context) {
@@ -71,13 +79,46 @@ func GetRate(c *gin.Context) {
 		return
 	}
 
-	var usdRate = rates[0].Rate
-
-	c.IndentedJSON(http.StatusOK, usdRate)
+	if len(rates) > 0 {
+		usdRate := rates[0].Rate
+		c.IndentedJSON(http.StatusOK, usdRate)
+	} else {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "No exchange rate data available"})
+	}
 }
 
 func addSubscription(c *gin.Context) {
+	var createRequest UserCreateDto
 
+	if err := c.BindJSON(&createRequest); err != nil {
+		return
+	}
+
+	if _, err := mail.ParseAddress(createRequest.Email); err != nil {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+		return
+	}
+
+	var user User
+
+	result := db.Where("email = ?", createRequest.Email).First(&user)
+
+	if result.Error == nil {
+		c.IndentedJSON(http.StatusConflict, gin.H{"error": "This email is already registered"})
+		return
+	} else if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	user.Email = createRequest.Email
+
+	if err := db.Create(&user).Error; err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, gin.H{"message": "E-mail added"})
 }
 
 func sendEmails(c *gin.Context) {
@@ -85,8 +126,8 @@ func sendEmails(c *gin.Context) {
 }
 
 func main() {
+	initDB()
 	runMigrations()
-	//db := dbConnect()
 
 	controller := gin.New()
 	controller.GET("/rate", GetRate)
