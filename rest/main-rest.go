@@ -1,6 +1,7 @@
-package main
+package rest
 
 import (
+	"awesomeProject/db"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,18 +9,14 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/robfig/cron/v3"
 	"gopkg.in/gomail.v2"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"io"
 	"log"
 	"net/http"
 	"net/mail"
 	"os"
-	"os/exec"
 	"strconv"
 )
-
-var db *gorm.DB
 
 type ExchangeRate struct {
 	R030         int     `json:"r030"`
@@ -36,31 +33,6 @@ type UserCreateDto struct {
 type User struct {
 	Id    int    `json:"id"`
 	Email string `json:"email"`
-}
-
-func initDB() {
-
-	host := os.Getenv("DB_HOST")
-	user := os.Getenv("DB_USER")
-	pass := os.Getenv("DB_PASSWORD")
-	dbname := os.Getenv("DB_NAME")
-
-	dsn := fmt.Sprintf("host=%s user=%s dbname=%s password=%s sslmode=disable", host, user, dbname, pass)
-
-	var err error
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-
-	if err != nil {
-		log.Fatal("Failed to connect to database")
-	}
-}
-
-func runMigrations() {
-	cmd := exec.Command("flyway", "migrate")
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to execute Flyway migrations: %v", err)
-	}
-	log.Println("Database migrations applied successfully.")
 }
 
 func fetchUSDExchangeRate() (float64, error) {
@@ -94,7 +66,7 @@ func GetRate(c *gin.Context) {
 
 	usdRate, err := fetchUSDExchangeRate()
 	if err != nil {
-		log.Printf("Error: %v", err)
+		log.Printf("Error fetching usd/uah rate: %v", err)
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -116,7 +88,7 @@ func addSubscription(c *gin.Context) {
 
 	var user User
 
-	result := db.Where("email = ?", createRequest.Email).First(&user)
+	result := db.DB.Where("email = ?", createRequest.Email).First(&user)
 
 	if result.Error == nil {
 		c.IndentedJSON(http.StatusConflict, gin.H{"error": "This email is already registered"})
@@ -129,7 +101,7 @@ func addSubscription(c *gin.Context) {
 
 	user.Email = createRequest.Email
 
-	if err := db.Create(&user).Error; err != nil {
+	if err := db.DB.Create(&user).Error; err != nil {
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
@@ -148,7 +120,7 @@ func sendEmails() error {
 
 	var allRegisteredUsers []User
 
-	result := db.Find(&allRegisteredUsers)
+	result := db.DB.Find(&allRegisteredUsers)
 
 	if result.Error != nil {
 		log.Println("Database error")
@@ -201,12 +173,12 @@ func sendEmailsHandler(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, "Emails sent successfully")
 }
 
-func setupCron() {
+func setupDailyEmails() {
 	c := cron.New()
-	// Schedule the sendEmails function to run at 8 AM every day
+	//Schedule the sendEmails function to run at 8 AM every day
 	_, err := c.AddFunc("0 8 * * *", func() {
 		if err := sendEmails(); err != nil {
-			log.Printf("Error in scheduled email sending: %v", err)
+			log.Fatalf("Error in scheduled email sending: %v", err)
 		}
 	})
 
@@ -222,15 +194,14 @@ func main() {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
 
-	initDB()
-	runMigrations()
+	db.Init()
 
 	controller := gin.New()
 	controller.GET("/rate", GetRate)
 	controller.POST("/subscribe", addSubscription)
 	controller.POST("/sendEmails", sendEmailsHandler)
 
-	setupCron()
+	setupDailyEmails()
 
 	if err := controller.Run("localhost:8080"); err != nil {
 		log.Fatalf("Sever run error")
