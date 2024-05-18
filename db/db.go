@@ -41,11 +41,12 @@ func Init() {
 	}
 
 	host := os.Getenv("DB_HOST")
+	port := os.Getenv("DB_PORT")
 	user := os.Getenv("DB_USER")
 	pass := os.Getenv("DB_PASSWORD")
 	dbname := os.Getenv("DB_NAME")
 
-	dsn := fmt.Sprintf("host=%s user=%s dbname=%s password=%s sslmode=disable", host, user, dbname, pass)
+	dsn := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=disable", host, port, user, dbname, pass)
 
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
@@ -54,5 +55,5 @@ func Init() {
 		log.Fatal("Failed to connect to database")
 	}
 
-	runMigrations()
+	//runMigrations()
 }

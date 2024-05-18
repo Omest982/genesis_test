@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  genesis_db:
+    container_name: genesis_db
+    image: postgres:16.1
+    restart: unless-stopped
+    ports:
+      - ${DB_PORT}:${DB_PORT}
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  genesis:
+    container_name: genesis
+    depends_on:
+      - genesis_db
+      - flyway
+    restart: on-failure
+    image: genesis
+    build: .
+    ports:
+      - ${SERVER_PORT}:${SERVER_PORT}
+    environment:
+      - SERVER_PORT=${SERVER_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=genesis_db
+      - DB_PORT=${DB_PORT}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+
+  flyway:
+    container_name: flyway
+    image: flyway/flyway:10.13.0
+    command: -url=jdbc:postgresql://genesis_db:${DB_PORT}/${DB_NAME} -user=${DB_USER} -password=${DB_PASSWORD} -locations=filesystem:/flyway/sql migrate
+    volumes:
+      - ./migrations:/flyway/sql
+    depends_on:
+      - genesis_db
+
+volumes:
+  db-data:

@@ -6,12 +6,14 @@ import (
 	"awesomeProject/service"
 	_type "awesomeProject/type"
 	"context"
+	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"log"
 	"net"
+	"os"
 )
 
 type myEmailServer struct {
@@ -65,7 +67,13 @@ func (s myEmailServer) SendEmails(context.Context, *emptypb.Empty) (*emptypb.Emp
 }
 
 func main() {
-	listener, err := net.Listen("tcp", ":8080")
+	if err := godotenv.Load(); err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
+	serverPort := os.Getenv("SERVER_PORT")
+
+	listener, err := net.Listen("tcp", ":"+serverPort)
 	if err != nil {
 		log.Fatalf("Cannot create listener: %s", err)
 	}
@@ -76,6 +84,8 @@ func main() {
 	myEmailService := &myEmailServer{}
 
 	emailService.RegisterEmailServiceServer(serverRegistrar, myEmailService)
+	service.SetupDailyEmails()
+
 	log.Println("gRPC server listening on port 8080")
 	if err := serverRegistrar.Serve(listener); err != nil {
 		log.Fatalf("Impossible to serve: %s", err)

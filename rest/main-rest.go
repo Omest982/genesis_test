@@ -8,6 +8,7 @@ import (
 	"github.com/joho/godotenv"
 	"log"
 	"net/http"
+	"os"
 )
 
 func getRate(c *gin.Context) {
@@ -79,7 +80,9 @@ func main() {
 
 	service.SetupDailyEmails()
 
-	if err := controller.Run("localhost:8080"); err != nil {
+	serverPort := os.Getenv("SERVER_PORT")
+
+	if err := controller.Run("localhost:" + serverPort); err != nil {
 		log.Fatalf("Sever run error")
 	}
 }
