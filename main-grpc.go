@@ -2,6 +2,8 @@ package main
 
 import (
 	"awesomeProject/db"
+	"awesomeProject/db/dbService"
+	"awesomeProject/db/repository/repositoryImpl"
 	"awesomeProject/emailService"
 	"awesomeProject/service"
 	_type "awesomeProject/type"
@@ -16,11 +18,12 @@ import (
 	"os"
 )
 
-type myEmailServer struct {
+type MyEmailServer struct {
 	emailService.UnimplementedEmailServiceServer
+	SubscriptionService *dbService.SubscriptionService
 }
 
-func (s myEmailServer) Rate(context.Context, *emptypb.Empty) (*emailService.RateResponse, error) {
+func (s MyEmailServer) Rate(context.Context, *emptypb.Empty) (*emailService.RateResponse, error) {
 	usdRate, err := service.FetchUSDExchangeRate()
 	if err != nil {
 		log.Printf("Error fetching usd/uah rate: %s", err)
@@ -30,15 +33,13 @@ func (s myEmailServer) Rate(context.Context, *emptypb.Empty) (*emailService.Rate
 	return &emailService.RateResponse{UsdRate: usdRate}, nil
 }
 
-func (s myEmailServer) AddSubscription(_ context.Context, createRequest *emailService.CreateSubscription) (*emptypb.Empty, error) {
+func (s MyEmailServer) AddSubscription(_ context.Context, createRequest *emailService.CreateSubscription) (*emptypb.Empty, error) {
 	if !service.IsEmailValid(createRequest.Email) {
 		log.Println("invalid email")
 		return nil, status.Error(codes.InvalidArgument, "invalid mail")
 	}
 
-	var subscription _type.Subscription
-
-	isSubscriptionExistsByEmail, dbError := db.IsSubscriptionExistsByEmail(createRequest.Email)
+	isSubscriptionExistsByEmail, dbError := s.SubscriptionService.IsSubscriptionExistsByEmail(createRequest.Email)
 
 	if dbError != nil {
 		return nil, status.Error(codes.Internal, dbError.Error())
@@ -49,16 +50,18 @@ func (s myEmailServer) AddSubscription(_ context.Context, createRequest *emailSe
 		return nil, status.Error(codes.AlreadyExists, "email already subscribed")
 	}
 
+	var subscription _type.Subscription
+
 	subscription.Email = createRequest.Email
 
-	if err := db.DB.Create(&subscription).Error; err != nil {
+	if err := s.SubscriptionService.AddSubscription(createRequest); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &emptypb.Empty{}, nil
 }
 
-func (s myEmailServer) SendEmails(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
+func (s MyEmailServer) SendEmails(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
 	if err := service.SendEmails(); err != nil {
 		log.Println("Error sending emails")
 		return nil, status.Error(codes.Internal, err.Error())
@@ -80,8 +83,13 @@ func main() {
 
 	db.Init()
 
+	subscriptionRepo := &repositoryImpl.SubscriptionRepositoryImpl{DB: db.DB}
+	subscriptionService := &dbService.SubscriptionService{Repo: subscriptionRepo}
+
 	serverRegistrar := grpc.NewServer()
-	myEmailService := &myEmailServer{}
+	myEmailService := &MyEmailServer{
+		SubscriptionService: subscriptionService,
+	}
 
 	emailService.RegisterEmailServiceServer(serverRegistrar, myEmailService)
 	service.SetupDailyEmails()
