@@ -6,8 +6,9 @@ import (
 	"awesomeProject/service"
 	_type "awesomeProject/type"
 	"context"
-	"fmt"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"log"
 	"net"
@@ -21,29 +22,46 @@ func (s myEmailServer) Rate(context.Context, *emptypb.Empty) (*emailService.Rate
 	usdRate, err := service.FetchUSDExchangeRate()
 	if err != nil {
 		log.Printf("Error fetching usd/uah rate: %s", err)
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	return &emailService.RateResponse{UsdRate: usdRate}, nil
 }
 
-func (s myEmailServer) AddSubscription(ctx context.Context, createRequest *emailService.CreateSubscription) (*emptypb.Empty, error) {
+func (s myEmailServer) AddSubscription(_ context.Context, createRequest *emailService.CreateSubscription) (*emptypb.Empty, error) {
+	if !service.IsEmailValid(createRequest.Email) {
+		log.Println("invalid email")
+		return nil, status.Error(codes.InvalidArgument, "invalid mail")
+	}
+
 	var subscription _type.Subscription
 
-	if !service.IsEmailValid(createRequest.Email) {
-		return nil, nil
+	isSubscriptionExistsByEmail, dbError := db.IsSubscriptionExistsByEmail(createRequest.Email)
+
+	if dbError != nil {
+		return nil, status.Error(codes.Internal, dbError.Error())
+	}
+
+	if isSubscriptionExistsByEmail {
+		log.Println("email already exists")
+		return nil, status.Error(codes.AlreadyExists, "email already subscribed")
 	}
 
 	subscription.Email = createRequest.Email
 
-	db.DB.Create()
+	if err := db.DB.Create(&subscription).Error; err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
 
-	return
+	return &emptypb.Empty{}, nil
 }
 
 func (s myEmailServer) SendEmails(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
-
-	return
+	if err := service.SendEmails(); err != nil {
+		log.Println("Error sending emails")
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func main() {
@@ -55,12 +73,11 @@ func main() {
 	db.Init()
 
 	serverRegistrar := grpc.NewServer()
-	service := &myEmailServer{}
+	myEmailService := &myEmailServer{}
 
-	emailService.RegisterEmailServiceServer(serverRegistrar, service)
+	emailService.RegisterEmailServiceServer(serverRegistrar, myEmailService)
+	log.Println("gRPC server listening on port 8080")
 	if err := serverRegistrar.Serve(listener); err != nil {
 		log.Fatalf("Impossible to serve: %s", err)
 	}
-
-	fmt.Println("Program started!")
 }

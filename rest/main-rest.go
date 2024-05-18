@@ -4,10 +4,8 @@ import (
 	"awesomeProject/db"
 	"awesomeProject/service"
 	_type "awesomeProject/type"
-	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"gorm.io/gorm"
 	"log"
 	"net/http"
 )
@@ -37,14 +35,14 @@ func addSubscription(c *gin.Context) {
 
 	var subscription _type.Subscription
 
-	result := db.DB.Where("email = ?", createRequest.Email).First(&subscription)
+	isSubscriptionExistsByEmail, dbError := db.IsSubscriptionExistsByEmail(createRequest.Email)
 
-	if result.Error == nil {
+	if dbError != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"error": "Db error"})
+	}
+
+	if isSubscriptionExistsByEmail {
 		c.IndentedJSON(http.StatusConflict, gin.H{"error": "This email is already registered"})
-		return
-	} else if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		log.Println("Database error")
-		c.IndentedJSON(http.StatusInternalServerError, nil)
 		return
 	}
 

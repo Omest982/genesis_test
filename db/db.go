@@ -1,6 +1,8 @@
 package db
 
 import (
+	_type "awesomeProject/type"
+	"errors"
 	"fmt"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -18,6 +20,19 @@ func runMigrations() {
 		log.Fatalf("Failed to execute Flyway migrations: %v", err)
 	}
 	log.Println("Database migrations applied successfully.")
+}
+
+func IsSubscriptionExistsByEmail(email string) (bool, error) {
+	var subscription _type.Subscription
+	result := DB.Where("email = ?", email).First(&subscription)
+
+	if result.Error == nil {
+		return true, nil
+	} else if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return false, result.Error
+	}
+
+	return false, nil
 }
 
 func Init() {
